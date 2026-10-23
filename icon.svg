@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Token and balance ball">
+  <defs>
+    <linearGradient id="ball" x1="10" y1="8" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4d8dff"/>
+      <stop offset="0.55" stop-color="#3568f0"/>
+      <stop offset="1" stop-color="#7c5cff"/>
+    </linearGradient>
+    <radialGradient id="shine" cx="0" cy="0" r="1" gradientTransform="translate(24 20) rotate(48) scale(28)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <circle cx="32" cy="32" r="26" fill="url(#ball)"/>
+  <circle cx="32" cy="32" r="26" fill="url(#shine)"/>
+  <circle cx="32" cy="32" r="25" fill="none" stroke="#ffffff" stroke-opacity="0.5" stroke-width="1.5"/>
+  <path d="M23 23h18M23 30h18M32 23v20M26 48c8-5 9-11 9-18" fill="none" stroke="#ffffff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="46" cy="18" r="4.5" fill="#5ee2a0" stroke="#ffffff" stroke-width="1.8"/>
+</svg>

@@ -1,0 +1,5 @@
+- insert:
+    - id: dsh-token-ball
+      name: '@local/dsh-token-ball'
+      config:
+        prices: {}

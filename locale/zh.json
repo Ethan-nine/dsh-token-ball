@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Token 与余额悬浮球",
+    "description": "可拖动的桌面悬浮球，实时显示当前对话的 Token 用量、预估花费与 DeepSeek 账户余额。"
+  }
+}
