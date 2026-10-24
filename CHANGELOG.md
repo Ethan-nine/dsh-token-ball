@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.1.0 — 2026-10-24
+
+Context-panel integration.
+
+- Detect the optional `billion-context` (“上下文” / `bili-context`) panel through
+  the Host's `/bili/origin` route.
+- Add a context-pressure ring and percentage badge around the floating ball.
+- Add a context card section with used/limit, sent tokens, compression savings,
+  active compression blocks, and the system/tool/message/code/summary breakdown.
+- Poll context status every 10 seconds, pause while the page is hidden, and
+  refresh immediately on focus.
+- Open the matching context panel from a “详情 / Details” link when available.
+- Hide the entire context UI when the optional plugin is absent or unreachable.
+- Context integration reads aggregate numbers only; conversation text is not
+  copied into Token Ball.
+
 ## 1.0.0 — 2026-10-23
 
 First public release.

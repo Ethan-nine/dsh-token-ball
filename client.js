@@ -9,6 +9,9 @@ window.__ModuleLoader__.load({
     const BALL_SIZE = 64;
     const EDGE = 12;
     const POLL_MS = 1200;
+    const CONTEXT_POLL_MS = 10_000;
+    const CONTEXT_RING_RADIUS = 30;
+    const CONTEXT_RING_LENGTH = 2 * Math.PI * CONTEXT_RING_RADIUS;
 
     const DICT = {
       en: {
@@ -33,6 +36,18 @@ window.__ModuleLoader__.load({
         estimate: 'Estimated with DeepSeek list prices',
         dragHint: 'Drag to move, click to expand',
         noUsage: 'No billable requests yet',
+        context: 'Context',
+        contextOpen: 'Details',
+        contextSent: 'Sent',
+        contextSaved: 'Compression saved',
+        contextBlocks: 'compressed blocks',
+        contextSysprompt: 'System prompt',
+        contextTool: 'Tools',
+        contextText: 'Messages',
+        contextCode: 'Code',
+        contextSummaries: 'Summaries',
+        contextSystem: 'System',
+        contextOther: 'Other',
       },
       zh: {
         title: '本对话',
@@ -56,6 +71,18 @@ window.__ModuleLoader__.load({
         estimate: '按 DeepSeek 官方价目估算',
         dragHint: '拖动移动，点击展开',
         noUsage: '还没有产生用量',
+        context: '上下文',
+        contextOpen: '详情',
+        contextSent: '发送',
+        contextSaved: '压缩节省',
+        contextBlocks: '个压缩块',
+        contextSysprompt: '系统提示',
+        contextTool: '工具',
+        contextText: '消息',
+        contextCode: '代码',
+        contextSummaries: '摘要',
+        contextSystem: '系统',
+        contextOther: '其他',
       },
     };
 
@@ -128,6 +155,23 @@ window.__ModuleLoader__.load({
       return new Intl.NumberFormat('en-US').format(Math.max(0, Math.round(number)));
     }
 
+    function formatCompactTokens(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return '0';
+      const absolute = Math.abs(number);
+      if (absolute >= 1e9) return `${(number / 1e9).toFixed(2)}B`;
+      if (absolute >= 1e6) return `${(number / 1e6).toFixed(2)}M`;
+      if (absolute >= 1e4) return `${(number / 1e3).toFixed(1)}K`;
+      return formatTokens(number);
+    }
+
+    function formatPercent(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return '—';
+      if (number > 0 && number < 10) return `${number.toFixed(1)}%`;
+      return `${Math.round(number)}%`;
+    }
+
     function formatMoney(value) {
       const number = Number(value);
       if (!Number.isFinite(number)) return '—';
@@ -160,6 +204,164 @@ window.__ModuleLoader__.load({
       return [...totals.entries()]
         .map(([currency, amount]) => `${currencySymbol(currency)}${formatMoney(amount)}`)
         .join(' + ');
+    }
+
+    const CONTEXT_CATEGORY_LABELS = {
+      sysprompt: 'contextSysprompt',
+      tool: 'contextTool',
+      text: 'contextText',
+      code: 'contextCode',
+      summaries: 'contextSummaries',
+      system: 'contextSystem',
+    };
+
+    const CONTEXT_CATEGORY_COLORS = {
+      sysprompt: 'var(--dsw-alias-brand-primary)',
+      tool: '#7c5cff',
+      text: '#2ea44f',
+      code: '#e05d8a',
+      summaries: '#f5a623',
+      system: '#8a94a6',
+    };
+
+    function contextCategoryLabel(translate, key) {
+      return translate(CONTEXT_CATEGORY_LABELS[key] ?? 'contextOther');
+    }
+
+    function contextCategoryColor(key) {
+      return CONTEXT_CATEGORY_COLORS[key] ?? 'var(--dsw-alias-border-l2)';
+    }
+
+    function contextPressureColor(percent) {
+      if (percent >= 85) return 'var(--dsw-alias-state-error-primary)';
+      if (percent >= 60) return '#f5a623';
+      return 'var(--dsw-alias-state-success-primary)';
+    }
+
+    function normalizeContext(status, expectedSessionId) {
+      if (!status || status.ok !== true) return null;
+      const actualSessionId = typeof status.sessionId === 'string'
+        ? status.sessionId
+        : (typeof status.conversationId === 'string' ? status.conversationId : '');
+      if (expectedSessionId && actualSessionId && actualSessionId !== expectedSessionId) return null;
+      const view = status.contextView && typeof status.contextView === 'object'
+        ? status.contextView
+        : {};
+      const limit = Number(status.contextLimit);
+      const anchorTokens = Number(view.anchor?.tokens);
+      const rawUsed = status.contextTokens ?? (Number.isFinite(anchorTokens) ? anchorTokens : view.sentTotal);
+      const used = Number(rawUsed);
+      if (!Number.isFinite(limit) || limit <= 0 || !Number.isFinite(used) || used < 0) return null;
+
+      const categories = Array.isArray(view.categories)
+        ? view.categories
+          .map((category) => ({
+            key: typeof category?.key === 'string' ? category.key : 'other',
+            tokens: Number(category?.tokens) || 0,
+            pct: Number(category?.pct) || 0,
+          }))
+          .filter((category) => category.tokens > 0)
+        : [];
+
+      const folds = Array.isArray(view.folds) ? view.folds : [];
+      let saved = 0;
+      for (const fold of folds) {
+        const value = Number(fold?.reclaimed);
+        if (Number.isFinite(value) && value > 0) saved += value;
+      }
+      if (saved === 0) {
+        for (const fold of folds) {
+          const value = Number(fold?.savedSoFar);
+          if (Number.isFinite(value)) saved = Math.max(saved, value);
+        }
+      }
+
+      const blocks = Array.isArray(status.blocks)
+        ? status.blocks.filter((block) => block && block.active === true).length
+        : 0;
+      const sent = Number(view.sentTotal);
+      const webUrl = typeof status.webUrl === 'string'
+        && /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(status.webUrl)
+        ? status.webUrl
+        : null;
+
+      return {
+        used,
+        limit,
+        sent: Number.isFinite(sent) && sent >= 0 ? sent : used,
+        percent: Math.max(0, Math.min(100, (used / limit) * 100)),
+        categories,
+        saved,
+        blocks,
+        webUrl,
+      };
+    }
+
+    function useContextStatus(sessionId) {
+      const [context, setContext] = useState(null);
+
+      useEffect(() => {
+        let disposed = false;
+        let busy = false;
+        let timer;
+        const controller = new AbortController();
+
+        const read = async () => {
+          if (busy) return;
+          busy = true;
+          try {
+            const originResponse = await fetch('/bili/origin', {
+              signal: controller.signal,
+              headers: { accept: 'application/json' },
+            });
+            if (!originResponse.ok) throw new Error('context-plugin-absent');
+            const originValue = await originResponse.json();
+            const origin = typeof originValue?.origin === 'string'
+              ? originValue.origin.replace(/\/+$/, '')
+              : '';
+            if (!origin) throw new Error('context-origin-missing');
+
+            const query = new URLSearchParams({
+              conversationId: sessionId || 'dsh',
+              fallback: 'latest',
+            });
+            const response = await fetch(`${origin}/__bili/plugin/status?${query}`, {
+              signal: controller.signal,
+              headers: { accept: 'application/json' },
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const status = await response.json();
+            if (disposed) return;
+            const next = normalizeContext(status, sessionId);
+            if (next) setContext(next);
+          } catch {
+            /* The context plugin is optional; keep the ball working without it. */
+          } finally {
+            busy = false;
+          }
+        };
+
+        setContext(null);
+        read();
+        timer = window.setInterval(() => {
+          if (!document.hidden) read();
+        }, CONTEXT_POLL_MS);
+        const onVisibility = () => {
+          if (!document.hidden) read();
+        };
+        window.addEventListener('focus', read);
+        document.addEventListener('visibilitychange', onVisibility);
+
+        return () => {
+          disposed = true;
+          window.clearInterval(timer);
+          controller.abort();
+          window.removeEventListener('focus', read);
+          document.removeEventListener('visibilitychange', onVisibility);
+        };
+      }, [sessionId]);
+
+      return context;
     }
 
     const CSS = `
@@ -235,6 +437,32 @@ window.__ModuleLoader__.load({
         border: 2px solid var(--dsw-alias-bg-overlay);
         box-shadow: 0 0 0 2px rgba(46, 204, 113, .14);
         animation: dshtb-pulse 2.2s ease-in-out infinite;
+      }
+      .dshtb-ring {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+      }
+      .dshtb-ring-track {
+        stroke: rgba(255, 255, 255, .18);
+      }
+      .dshtb-ctx-badge {
+        position: absolute;
+        left: 50%;
+        bottom: 4px;
+        transform: translateX(-50%);
+        padding: 1px 5px;
+        border-radius: 999px;
+        background: rgba(16, 18, 35, .28);
+        color: #fff;
+        font-size: 8px;
+        font-weight: 650;
+        line-height: 11px;
+        letter-spacing: .1px;
+        font-variant-numeric: tabular-nums;
+        pointer-events: none;
       }
       .dshtb-card {
         position: absolute;
@@ -350,6 +578,111 @@ window.__ModuleLoader__.load({
         line-height: 12px;
         font-variant-numeric: tabular-nums;
       }
+      .dshtb-context {
+        margin-top: 12px;
+        padding: 9px 10px 10px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 10px;
+        background: var(--dsw-alias-bg-layer-1);
+      }
+      .dshtb-context-head {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .dshtb-context-title {
+        font-size: 11px;
+        font-weight: 600;
+        line-height: 15px;
+      }
+      .dshtb-context-pct {
+        margin-left: auto;
+        font-size: 13px;
+        font-weight: 650;
+        line-height: 16px;
+        font-variant-numeric: tabular-nums;
+      }
+      .dshtb-context-link {
+        border: 0;
+        background: transparent;
+        color: var(--dsw-alias-brand-primary);
+        font-size: 10px;
+        line-height: 14px;
+        padding: 0;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .dshtb-context-link:hover { text-decoration: underline; }
+      .dshtb-context-link:focus-visible {
+        outline: 2px solid var(--dsw-alias-brand-primary);
+        outline-offset: 1px;
+        border-radius: 2px;
+      }
+      .dshtb-context-bar {
+        height: 5px;
+        margin-top: 7px;
+        border-radius: 999px;
+        background: var(--dsw-alias-border-l1);
+        overflow: hidden;
+      }
+      .dshtb-context-bar span {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+        transition: width .35s ease, background .35s ease;
+      }
+      .dshtb-context-meta {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        margin-top: 5px;
+        color: var(--dsw-alias-label-secondary);
+        font-size: 10px;
+        line-height: 13px;
+        font-variant-numeric: tabular-nums;
+      }
+      .dshtb-context-saved {
+        margin-top: 2px;
+        color: var(--dsw-alias-label-secondary);
+        font-size: 9px;
+        line-height: 12px;
+        font-variant-numeric: tabular-nums;
+      }
+      .dshtb-context-stack {
+        display: flex;
+        gap: 2px;
+        height: 6px;
+        margin-top: 7px;
+        border-radius: 999px;
+        overflow: hidden;
+        background: var(--dsw-alias-border-l1);
+      }
+      .dshtb-context-stack span {
+        display: block;
+        height: 100%;
+        min-width: 2px;
+      }
+      .dshtb-context-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 3px 8px;
+        margin-top: 6px;
+        color: var(--dsw-alias-label-secondary);
+        font-size: 9px;
+        line-height: 12px;
+      }
+      .dshtb-context-legend-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        white-space: nowrap;
+      }
+      .dshtb-context-dot {
+        width: 5px;
+        height: 5px;
+        border-radius: 999px;
+        flex: none;
+      }
       .dshtb-divider {
         height: 1px;
         background: var(--dsw-alias-border-l1);
@@ -448,6 +781,7 @@ window.__ModuleLoader__.load({
     function TokenBall({ t }) {
       const translate = typeof t === 'function' ? t : fallbackTranslate;
       const sessionId = useActiveSession();
+      const context = useContextStatus(sessionId);
       const [open, setOpen] = useState(false);
       const [data, setData] = useState(null);
       const [error, setError] = useState(null);
@@ -583,6 +917,13 @@ window.__ModuleLoader__.load({
       const cachePercent = totals.promptTokens > 0
         ? Math.round((totals.cacheReadTokens / totals.promptTokens) * 100)
         : 0;
+      const contextColor = context ? contextPressureColor(context.percent) : null;
+      const contextRingDash = context
+        ? `${(context.percent / 100) * CONTEXT_RING_LENGTH} ${CONTEXT_RING_LENGTH}`
+        : null;
+      const contextTitle = context
+        ? ` · ${translate('context')} ${formatPercent(context.percent)}`
+        : '';
       const panelUp = position.y > window.innerHeight / 2;
       const panelRight = position.x > window.innerWidth / 2;
       const panelStyle = {
@@ -659,6 +1000,74 @@ window.__ModuleLoader__.load({
               h('div', { className: 'dshtb-stat-value', key: 'value' }, formatTokens(totals.pricedCalls)),
             ]),
           ]),
+          context && h('div', { className: 'dshtb-context', key: 'context' }, [
+            h('div', { className: 'dshtb-context-head', key: 'head' }, [
+              h('span', { className: 'dshtb-context-title', key: 'title' }, translate('context')),
+              h('span', {
+                className: 'dshtb-context-pct',
+                key: 'pct',
+                style: { color: contextColor },
+              }, formatPercent(context.percent)),
+              context.webUrl && h('a', {
+                className: 'dshtb-context-link',
+                key: 'open',
+                href: context.webUrl,
+                target: '_blank',
+                rel: 'noreferrer noopener',
+                title: translate('contextOpen'),
+              }, translate('contextOpen')),
+            ]),
+            h('div', { className: 'dshtb-context-bar', key: 'bar' }, [
+              h('span', {
+                key: 'fill',
+                style: {
+                  width: `${Math.min(100, context.percent)}%`,
+                  background: contextColor,
+                },
+              }),
+            ]),
+            h('div', { className: 'dshtb-context-meta', key: 'meta' }, [
+              h('span', { key: 'usage' },
+                `${formatCompactTokens(context.used)} / ${formatCompactTokens(context.limit)}`),
+              h('span', { key: 'sent' },
+                `${translate('contextSent')} ${formatCompactTokens(context.sent)}`),
+            ]),
+            (context.saved > 0 || context.blocks > 0) && h('div', {
+              className: 'dshtb-context-saved',
+              key: 'saved',
+            }, [
+              context.saved > 0
+                ? `${translate('contextSaved')} ${formatCompactTokens(context.saved)}`
+                : null,
+              context.blocks > 0
+                ? `${context.blocks} ${translate('contextBlocks')}`
+                : null,
+            ].filter(Boolean).join(' · ')),
+            context.categories.length > 0 && h('div', {
+              className: 'dshtb-context-stack',
+              key: 'stack',
+            }, context.categories.map((category) => h('span', {
+              key: category.key,
+              style: {
+                width: `${Math.min(100, category.pct)}%`,
+                background: contextCategoryColor(category.key),
+              },
+            }))),
+            context.categories.length > 0 && h('div', {
+              className: 'dshtb-context-legend',
+              key: 'legend',
+            }, context.categories.map((category) => h('span', {
+              className: 'dshtb-context-legend-item',
+              key: category.key,
+            }, [
+              h('span', {
+                className: 'dshtb-context-dot',
+                key: 'dot',
+                style: { background: contextCategoryColor(category.key) },
+              }),
+              `${contextCategoryLabel(translate, category.key)} ${Math.round(category.pct)}%`,
+            ]))),
+          ]),
           h('div', { className: 'dshtb-divider', key: 'divider' }),
           h('div', { className: 'dshtb-balance', key: 'balance' }, [
             h('div', { key: 'left' }, [
@@ -678,8 +1087,8 @@ window.__ModuleLoader__.load({
           type: 'button',
           className: 'dshtb-ball',
           style: { position: 'relative' },
-          title: `${translate('dragHint')} · ${translate('title')}: ¥${cost}`,
-          'aria-label': `${translate('title')} ¥${cost}`,
+          title: `${translate('dragHint')} · ${translate('title')}: ¥${cost}${contextTitle}`,
+          'aria-label': `${translate('title')} ¥${cost}${contextTitle}`,
           'aria-expanded': open,
           onPointerDown,
           onPointerMove,
@@ -687,9 +1096,39 @@ window.__ModuleLoader__.load({
           onPointerCancel: onPointerUp,
           onKeyDown,
         }, [
+          context && h('svg', {
+            className: 'dshtb-ring',
+            key: 'ring',
+            viewBox: `0 0 ${BALL_SIZE} ${BALL_SIZE}`,
+            'aria-hidden': true,
+          }, [
+            h('circle', {
+              className: 'dshtb-ring-track',
+              key: 'track',
+              cx: BALL_SIZE / 2,
+              cy: BALL_SIZE / 2,
+              r: CONTEXT_RING_RADIUS,
+              fill: 'none',
+              strokeWidth: 3,
+            }),
+            context.percent > 0 && h('circle', {
+              key: 'progress',
+              cx: BALL_SIZE / 2,
+              cy: BALL_SIZE / 2,
+              r: CONTEXT_RING_RADIUS,
+              fill: 'none',
+              stroke: contextColor,
+              strokeWidth: 3,
+              strokeLinecap: 'round',
+              strokeDasharray: contextRingDash,
+              transform: `rotate(-90 ${BALL_SIZE / 2} ${BALL_SIZE / 2})`,
+            }),
+          ]),
           data?.live && h('span', { className: 'dshtb-live', key: 'live', 'aria-hidden': true }),
           h('span', { className: 'dshtb-currency', key: 'currency' }, '¥'),
           h('span', { className: 'dshtb-amount', key: 'amount' }, cost),
+          context && h('span', { className: 'dshtb-ctx-badge', key: 'ctx' },
+            formatPercent(context.percent)),
         ]),
       ]);
     }

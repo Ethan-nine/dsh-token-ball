@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Token & Balance Ball",
-    "description": "A draggable floating ball showing this conversation's tokens, estimated cost, and DeepSeek account balance."
+    "description": "A draggable floating ball showing this conversation's tokens, estimated cost, context pressure, and DeepSeek account balance."
   }
 }

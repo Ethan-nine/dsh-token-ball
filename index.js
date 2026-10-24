@@ -52,7 +52,7 @@ function accountMetadata(req) {
   const header = String(req.headers['accept-language'] ?? '');
   const locale = header.toLowerCase().includes('zh') ? 'zh-CN' : 'en-US';
   return {
-    version: '1.0.0',
+    version: '1.1.0',
     locale,
     timezoneOffsetSeconds: 8 * 60 * 60,
   };
