@@ -301,6 +301,10 @@ window.__ModuleLoader__.load({
       const [context, setContext] = useState(null);
 
       useEffect(() => {
+        if (!sessionId) {
+          setContext(null);
+          return undefined;
+        }
         let disposed = false;
         let busy = false;
         let timer;
@@ -322,7 +326,7 @@ window.__ModuleLoader__.load({
             if (!origin) throw new Error('context-origin-missing');
 
             const query = new URLSearchParams({
-              conversationId: sessionId || 'dsh',
+              conversationId: sessionId,
               fallback: 'latest',
             });
             const response = await fetch(`${origin}/__bili/plugin/status?${query}`, {
